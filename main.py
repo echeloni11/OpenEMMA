@@ -26,14 +26,21 @@ from llava.utils import disable_torch_init
 from llava.mm_utils import tokenizer_image_token, process_images, get_model_name_from_path
 from llava.conversation import conv_templates
 
+# ROSS
+from ross.model.builder import load_pretrained_model
+from ross.mm_utils import get_model_name_from_path, process_images, tokenizer_image_token
+# from ross.eval.run_llava import eval_model
+
 client = OpenAI(api_key="[your-openai-api-key]")
 
 OBS_LEN = 10
 FUT_LEN = 10
+# OBS_LEN = 4
+# FUT_LEN = 6
 TTL_LEN = OBS_LEN + FUT_LEN
 
 def getMessage(prompt, image=None, args=None):
-    if "llama" in args.model_path:
+    if "llama" in args.model_path or "ross" in args.model_path:
         message = [
             {"role": "user", "content": [
                 {"type": "image"},
@@ -91,6 +98,49 @@ def vlm_inference(text=None, images=None, sys_message=None, processor=None, mode
                 generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
             )
             return output_text[0]
+        # modified: add ross
+        elif "ross" in args.model_path:
+            conv_mode = "mistral_instruct"
+            image_token_se = DEFAULT_IM_START_TOKEN + DEFAULT_IMAGE_TOKEN + DEFAULT_IM_END_TOKEN
+            if IMAGE_PLACEHOLDER in text:
+                if model.config.mm_use_im_start_end:
+                    text = re.sub(IMAGE_PLACEHOLDER, image_token_se, text)
+                else:
+                    text = re.sub(IMAGE_PLACEHOLDER, DEFAULT_IMAGE_TOKEN, text)
+            else:
+                if model.config.mm_use_im_start_end:
+                    text = image_token_se + "\n" + text
+                else:
+                    text = DEFAULT_IMAGE_TOKEN + "\n" + text
+
+            conv = conv_templates[conv_mode].copy()
+            conv.append_message(conv.roles[0], text)
+            conv.append_message(conv.roles[1], None)
+            prompt = conv.get_prompt()
+
+            input_ids = tokenizer_image_token(prompt, tokenizer, IMAGE_TOKEN_INDEX, return_tensors='pt').unsqueeze(0).cuda()
+            image = Image.open(images).convert('RGB')
+
+            if not isinstance(image, list):
+                image = [image]
+
+            image_tensor = process_images(image, processor, model.config).cuda()
+
+            with torch.inference_mode():
+                output_ids = model.generate(
+                    input_ids,
+                    images=image_tensor,
+                    do_sample=True,
+                    temperature=0.2,
+                    top_p=None,
+                    num_beams=1,
+                    max_new_tokens=2048,
+                    use_cache=True,
+                )
+
+            outputs = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0].strip()
+            return outputs
+
 
         elif "llava" in args.model_path:
             conv_mode = "mistral_instruct"
@@ -114,7 +164,10 @@ def vlm_inference(text=None, images=None, sys_message=None, processor=None, mode
             input_ids = tokenizer_image_token(prompt, tokenizer, IMAGE_TOKEN_INDEX, return_tensors='pt').unsqueeze(0).cuda()
             image = Image.open(images).convert('RGB')
 
-            image_tensor = process_images([image], processor, model.config)[0]
+            if not isinstance(image, list):
+                image = [image]
+
+            image_tensor = process_images(image, processor, model.config)[0]
 
             with torch.inference_mode():
                 output_ids = model.generate(
@@ -247,7 +300,6 @@ if __name__ == '__main__':
     parser.add_argument("--method", type=str, default='openemma')
     args = parser.parse_args()
 
-    
     if "llama" in args.model_path:
         model_id = "meta-llama/Llama-3.2-11B-Vision-Instruct"
         model = MllamaForConditionalGeneration.from_pretrained(
@@ -265,7 +317,19 @@ if __name__ == '__main__':
         disable_torch_init()
         tokenizer, model, processor, context_len = load_pretrained_model("liuhaotian/llava-v1.6-mistral-7b", None, "llava-v1.6-mistral-7b")
         image_token_se = DEFAULT_IM_START_TOKEN + DEFAULT_IMAGE_TOKEN + DEFAULT_IM_END_TOKEN
-        
+    
+    # modified: add Ross
+    elif "ross" in args.model_path:
+        model_path = "HaochenWang/ross-qwen2-7b"
+
+        tokenizer, model, processor, context_len = load_pretrained_model(
+            model_path=model_path,
+            model_base=None,
+            model_name=get_model_name_from_path(model_path)
+        )
+
+        model.cuda()
+        model.eval()
     else:
         model = None
         processor = None
@@ -289,7 +353,8 @@ if __name__ == '__main__':
         description = scene['description']
 
         if not name in ["scene-0103", "scene-1077"]:
-            continue
+            continue    ### NOTE: why continue? 
+                        ### How long does it take for complete inference on val 150 scenes?
 
         # Get all image and pose in this scene
         front_camera_images = []
@@ -363,6 +428,7 @@ if __name__ == '__main__':
         ade2s_list = []
         ade3s_list = []
         for i in range(scene_length - TTL_LEN):
+        # for i in range(0, scene_length - TTL_LEN, 4):
             # Get the raw image data.
             # utils.PlotBase64Image(front_camera_images[0])
             obs_images = front_camera_images[i:i+OBS_LEN]
@@ -489,8 +555,8 @@ if __name__ == '__main__':
             f.write(json.dumps(result))
             f.write("\n")
 
-        if args.plot:
-            WriteImageSequenceToVideo(cam_images_sequence, f"{timestamp}/{name}")
+        # if args.plot:
+        #     WriteImageSequenceToVideo(cam_images_sequence, f"{timestamp}/{name}")
 
         # break  # Scenes
 

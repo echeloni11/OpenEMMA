@@ -280,7 +280,11 @@ def IntegrateCurvatureForPoints(curvatures, velocities_norm, initial_position, i
     theta0 = initial_heading  # Initial orientation (radians)
 
     # Integrate to compute heading (theta)
-    theta = cumulative_trapezoid(curvatures * velocities_norm, t, initial=theta0)
+    # theta = cumulative_trapezoid(curvatures * velocities_norm, t, initial=theta0)
+    # Modified: in python3.10 cumulative_trapezoid initial must be 0 or None
+    theta = cumulative_trapezoid(curvatures * velocities_norm, t, initial=None)
+    theta = np.insert(theta, 0, theta0)
+
     theta[1:] += theta0
 
     # Compute velocity components
@@ -288,8 +292,12 @@ def IntegrateCurvatureForPoints(curvatures, velocities_norm, initial_position, i
     v_y = velocities_norm * np.sin(theta)
 
     # Integrate to compute trajectory
-    x = cumulative_trapezoid(v_x, t, initial=x0)
-    y = cumulative_trapezoid(v_y, t, initial=y0)
+    # x = cumulative_trapezoid(v_x, t, initial=x0)
+    # y = cumulative_trapezoid(v_y, t, initial=y0)
+    x = cumulative_trapezoid(v_x, t, initial=None)
+    y = cumulative_trapezoid(v_y, t, initial=None)
+    x = np.insert(x, 0, x0)
+    y = np.insert(y, 0, y0)
 
     x[1:] += x0
     y[1:] += y0

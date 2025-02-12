@@ -18,3 +18,8 @@ env/
 
 # Project specific
 gpt_results/
+*_results/
+
+# Explore
+tmp.ipynb
+run_records.txt
